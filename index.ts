@@ -15,11 +15,12 @@ if (!ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY is not set");
 }
 
-class MCPClient {
+export class MCPClient {
     private mcp: Client;
     private anthropic: Anthropic;
     private transport: StdioClientTransport | null = null;
     private tools: Tool[] = [];
+    private conversationHistories: Map<string, MessageParam[]> = new Map();
 
     constructor() {
         this.anthropic = new Anthropic({
@@ -63,29 +64,40 @@ class MCPClient {
             console.log("Failed to connect to MCP server: ", e);
             throw e;
         }
+        this.conversationHistories = new Map();
     }
 
-    async processQuery(query: string) {
-        const messages: MessageParam[] = [
-            {
-                role: "user",
-                content: query,
-            },
-        ];
+    async processQuery(sessionId: string, query: string) {
+        // Get or create conversation history for this session
+        let history = this.conversationHistories.get(sessionId);
+        if (!history) {
+            history = [];
+            this.conversationHistories.set(sessionId, history);
+        }
 
+        // Append the user message
+        history.push({
+            role: "user",
+            content: query,
+        });
+
+        // Send the entire conversation to Anthropic
         const response = await this.anthropic.messages.create({
             model: "claude-3-5-sonnet-20241022",
             max_tokens: 1000,
-            messages,
+            messages: history,
             tools: this.tools,
         });
 
-        const finalText = [];
-        const toolResults = [];
+        const finalText: string[] = [];
 
         for (const content of response.content) {
             if (content.type === "text") {
                 finalText.push(content.text);
+                history.push({
+                    role: "assistant",
+                    content: content.text,
+                });
             } else if (content.type === "tool_use") {
                 const toolName = content.name;
                 const toolArgs = content.input as { [x: string]: unknown } | undefined;
@@ -94,25 +106,34 @@ class MCPClient {
                     name: toolName,
                     arguments: toolArgs,
                 });
-                toolResults.push(result);
                 finalText.push(
                     `[Calling tool ${toolName} with args ${JSON.stringify(toolArgs)}]`
                 );
 
-                messages.push({
+                // Append the tool result as a user message
+                history.push({
                     role: "user",
                     content: result.content as string,
                 });
 
-                const response = await this.anthropic.messages.create({
+                // Call Anthropic again with the updated history
+                const followUpResponse = await this.anthropic.messages.create({
                     model: "claude-3-5-sonnet-20241022",
                     max_tokens: 1000,
-                    messages,
+                    messages: history,
                 });
 
-                finalText.push(
-                    response.content[0].type === "text" ? response.content[0].text : ""
-                );
+                if (
+                    followUpResponse.content &&
+                    followUpResponse.content[0].type === "text"
+                ) {
+                    const text = followUpResponse.content[0].text;
+                    finalText.push(text);
+                    history.push({
+                        role: "assistant",
+                        content: text,
+                    });
+                }
             }
         }
 
@@ -134,7 +155,7 @@ class MCPClient {
                 if (message.toLowerCase() === "quit") {
                     break;
                 }
-                const response = await this.processQuery(message);
+                const response = await this.processQuery("abc", message);
                 console.log("\n" + response);
             }
         } finally {
