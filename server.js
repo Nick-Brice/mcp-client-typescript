@@ -4,7 +4,7 @@ import { MCPClient } from "./build/index.js"; // adjust path to where your MCPCl
 
 dotenv.config();
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4000;
 const SERVER_SCRIPT_PATH = process.env.SERVER_SCRIPT_PATH || 'C:\\Users\\Nick\\weather\\build\\index.js'; // set this appropriately
 
 async function startServer() {
@@ -48,8 +48,8 @@ async function startServer() {
         }
     });
 
-    app.listen(PORT, () => {
-        console.log(`MCP client server running at http://localhost:${PORT}`);
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`MCP client server running at http://0.0.0.0:${PORT}`);
     });
 
     // Cleanup on shutdown
