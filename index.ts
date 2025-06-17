@@ -81,7 +81,9 @@ export class MCPClient {
             content: query,
         });
 
-        if (history?.length > 20) return "You have ran out of messages, please email us if you need more."
+        if (history?.length > 20) {
+            return "You have ran out of messages, please email us if you need more."
+        }
 
         // Send the entire conversation to Anthropic
         const response = await this.anthropic.messages.create({
