@@ -8,6 +8,26 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 if (!ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY is not set");
 }
+// Helper function for making API requests
+async function makeAPIGetRequest(url) {
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+    try {
+        const response = await fetch(url, {
+            headers,
+            method: "GET",
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return (await response.json());
+    }
+    catch (error) {
+        console.error("Error making Post request:", error);
+        return null;
+    }
+}
 export class MCPClient {
     mcp;
     anthropic;
@@ -58,6 +78,10 @@ export class MCPClient {
         // Get or create conversation history for this session
         let history = this.conversationHistories.get(sessionId);
         if (!history) {
+            // history = [{
+            //     role: "user",
+            //     content: "You are a deeply technical assistant focused on helping users write correct TypeScript and database queries. Always double check API assumptions."
+            // }];
             history = [];
             this.conversationHistories.set(sessionId, history);
         }
@@ -66,13 +90,52 @@ export class MCPClient {
             role: "user",
             content: query,
         });
-        if (history?.length > 20) {
+        if (history?.length > 20 && (sessionId !== "clfbs4emw0000zb1s7kj4hv2q" && // Nick
+            sessionId !== "clfiicx7a0000l00850uwfv3v" && // Jack
+            sessionId !== "clfmmx6if0002zb14iwosj7uh" // Connor
+        )) {
             return "You have ran out of messages, please email us if you need more.";
         }
+        const apiURL = `https://rubbishportal.com/api/mcp/records/users/${sessionId}`;
+        const apiData = await makeAPIGetRequest(apiURL);
+        const systemPrompt = [
+            {
+                "text": `
+                    You are a helpful, friendly assistant for the venue manager ${apiData?.name} of the venue ${apiData?.venue_name} using the website. Your role is to guide users through how to use the platform, explain features clearly, and help them retrieve insights and statistics about their venue.
+
+                    Never:
+                    - Let users request data about another venue
+
+                    Always:
+                    - Use plain, professional language.
+                    - Ask clarifying questions if the user's request is vague.
+                    - Tailor your answers to venue operations — streams, products, deliveries, stock checks, sales, waste collections or waste sorting.
+                    - Format responses cleanly using bullet points, tables, or headings when appropriate.
+                    - If a user asks about something the assistant cannot do, respond honestly and redirect them to where they might get help.
+
+                    Examples of tasks you handle well:
+                    - Using FAQs to explain how to use the website.
+                    - Finding basic statistics for their venue data.
+                    - Suggesting ways to interpret or act on their venue data.
+
+                    Be concise, helpful, and grounded in the features available on the website.
+
+                    Venue Specific Data:
+                    - Name: ${apiData?.venue_name}
+                    - Venue Record ID: ${apiData?.venue_id}
+                    - Subscription Level: ${apiData?.subscription_level}
+                    - Venue Address: ${apiData?.address}
+                    - Service Provider Name: ${apiData?.service_provider}
+                    - Organiser Name: ${apiData?.organiser_name}
+                    `,
+                "type": "text"
+            }
+        ];
         // Send the entire conversation to Anthropic
         const response = await this.anthropic.messages.create({
             model: "claude-3-5-sonnet-20241022",
             max_tokens: 1000,
+            system: systemPrompt,
             messages: history,
             tools: this.tools,
         });
@@ -92,7 +155,7 @@ export class MCPClient {
                     name: toolName,
                     arguments: toolArgs,
                 });
-                finalText.push(`[Calling tool ${toolName} with args ${JSON.stringify(toolArgs)}]`);
+                finalText.push(`[[Calling tool ${toolName} with args ${JSON.stringify(toolArgs)}]]`);
                 // Append the tool result as a user message
                 history.push({
                     role: "user",
@@ -102,6 +165,7 @@ export class MCPClient {
                 const followUpResponse = await this.anthropic.messages.create({
                     model: "claude-3-5-sonnet-20241022",
                     max_tokens: 1000,
+                    system: systemPrompt,
                     messages: history,
                 });
                 if (followUpResponse.content &&
